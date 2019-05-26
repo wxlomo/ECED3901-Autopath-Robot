@@ -1,0 +1,26 @@
+1. Autonomous
+2. Locomotion
+  2.1 Motor
+    2.1.1 Motor Calibration
+   2.2 Motor Driver
+    2.2.1 Motor Driver Testing
+   2.3 Odometer
+    2.3.1 Encoder
+    2.3.2 Encoder Signal Processing PCB
+   2.4 Movement Algorithm
+    2.4.1 Track X,Y and Angle
+    2.4.2 Move in Straight Line
+    2.4.3 Move to a specified angled
+3. Obstacle Detection
+  3.1 Lidar
+  3.2 Sonar
+  3.3 Detection Algorithm
+    3.3.1 Test accuracy of obstacle detection
+    3.3.2 Action to be taken when obstacle is detected
+4. Boundary Detection
+  4.1 Metal Detector
+5. Pipeline Detection
+  4.2 Metal Detector
+6. Manifold Communication
+  6.1 LED 
+  6.2 Photodiode
