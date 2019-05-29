@@ -1,0 +1,57 @@
+#include <avr/io.h>
+#include <avr/pgmspace.h>
+#include <avr/interrupt.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+float frequency = 0.0;
+float a = 0.0;
+
+/*UART Set Up*/
+int uart_putchar(char c,FILE *stream);
+int uart_getchar(FILE *stream);
+FILE mystdout = FDEV_SETUP_STREAM(uart_putchar,NULL,_FDEV_SETUP_WRITE);
+FILE mystdin = FDEV_SETUP_STREAM(NULL,uart_getchar,_FDEV_SETUP_READ);
+int uart_putchar(char c, FILE *stream){
+		loop_until_bit_is_set(UCSR0A,UDRE0);
+		UDR0=c;
+		return 0;
+}
+int uart_getchar(FILE *stream){
+		loop_until_bit_is_set(UCSR0A,RXC0);
+		return UDR0;
+}
+/*UART Initiation*/
+void init_uart(void){
+		UCSR0B = (1<<RXEN0)|(1<<TXEN0);
+		UBRR0=7;
+		stdout= &mystdout;
+		stdin = &mystdin;
+}
+/*General Initiation*/
+void init_644(void){
+		cli(); //Disable all interrupt to initialize UART 
+init_uart();
+		TCNT1=0x00;
+		DDRC = 0x00; //Set PC# as input
+		PCMSK2 |= 0x01; //Enable PC0 as input
+		PCICR |= (1<<2);
+	TCCR1B = 0x01;//No pre-scale
+		sei(); //Enable all interrupt
+}
+/*Main Code*/
+int main(void){
+		init_644();
+		while(1){
+			frequency = 14745600.0/(float)a; 
+//Frequency = 1/T = 1/(time/14745600)
+			printf_P(PSTR("frequency of the impulse is %5.3f\n"), frequency);
+		}
+}
+/*IO Interrupt Set Up*/
+ISR(PCINT2_vect){ 
+		if(PINC&0x01){ //If PC0 is high
+			a = TCNT1; // Set “a” as the interval time
+			TCNT1 = 0; //Reset for next edge
+		}
+}
