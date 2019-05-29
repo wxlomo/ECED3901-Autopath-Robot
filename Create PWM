@@ -1,0 +1,21 @@
+ * Created: 2019-05-09 6:25:14 PM
+ * Author : kadh1
+ */ 
+
+#include <avr/io.h>
+#include <avr/interrupt.h>
+
+int main(void)
+{
+    /* Replace with your application code */
+	    DDRB |= 1<<3 | 1<<4;    // Set OC0A and OC0B as output
+		TCCR0A = 1<<7| 0<< 6 | 1<<5 | 1<<4| 1<<1 |1<<0;    //Set waveform generation mode  
+		TCCR0B = 1<<1;    //Set clock divider to be /8 to acheive 7.2kHz 
+		TIMSK0 = 1<<1 |1<<2; // Enable OC0A and OC0B Match interrupt
+		sei(); // Enable global interrupts
+		OCR0A = 64; //Set duty cycle for OC0A  
+		OCR0B = 64; //Set duty cycle for OC0B
+    while (1) 
+    {                 
+    }
+}
