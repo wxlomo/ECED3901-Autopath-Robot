@@ -1,0 +1,4 @@
+$ 250 - Budget
+  - $100 Digikey Purchases ($30 - $50 dedicated for PCB)
+  - $150 Components sold in the shop
+  
