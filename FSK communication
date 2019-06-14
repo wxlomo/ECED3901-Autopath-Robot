@@ -8,3 +8,5 @@ OCRnX = 61.5
 4KHz 
 N=64 (Prescalar)
 OCRnX = 30.25
+
+CLOSE should be sent in ASCII - 9.091ms per bit transfer
