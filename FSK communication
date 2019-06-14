@@ -1,0 +1,10 @@
+TC0A - Communication System (LED + Photodiode)
+CTC Mode
+
+2KHz 
+N=64 (Prescalar)
+OCRnX = 61.5
+
+4KHz 
+N=64 (Prescalar)
+OCRnX = 30.25
