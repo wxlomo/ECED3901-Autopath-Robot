@@ -13,8 +13,8 @@ Colpitts
   5V 
   GND
 NAND
-  PB3-
-  PB4
-  PB5
-  PB6
+  PB3- Input 1 of NAND 1
+  PB4- Input 9 of NAND 3
+  PB5- Input 4 of NAND 2
+  PB6- Input 13 of NAND 4
   
