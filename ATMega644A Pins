@@ -17,4 +17,10 @@ NAND
   PB4- Input 9 of NAND 3
   PB5- Input 4 of NAND 2
   PB6- Input 13 of NAND 4
+IMU
+Signal Processing
+  PC2 and PC3 from ATMega644A to Encoder Board R & L Pins 
+Communication (to the manifold)
+  LED flashes light at certain frequency to turn off manifold
+  Timer0- 
   
