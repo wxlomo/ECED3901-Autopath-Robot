@@ -1,0 +1,20 @@
+Right SONAR
+  5V (pin 1)
+  PD5 - Timer1, Trig
+  PD3 - Echo 
+  Power, GND (pin 5)
+LIDAR
+  5V (pin 2)
+  GND (pin 3)
+  PC1 - (pin 4)
+  PC0 - (pin 5)
+Colpitts
+  A7 - Analog Input
+  5V 
+  GND
+NAND
+  PB3-
+  PB4
+  PB5
+  PB6
+  
