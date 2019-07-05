@@ -1,0 +1,315 @@
+/*
+* Lab3_PID.c
+* Created: 2019-04-15 8:48:47 AM
+* Author : SiebenLab
+*/
+//---------------------------------------------------------------------------------------
+//Definitions and Includes
+//--------------------------------------------------------------------------------------- #define F_CPU
+14745600UL //Crystal Clock freq.
+#define Encoder_Notches 24u //Custom encoders
+#define tire_dia 65u //DF robot wheels in millimeters
+#define max_RPM 200.0 //DF robot limitation at 6V
+#define min_RPM 10.0 //Robot limit based on encoders sense rate #define timer1_period
+4.34027777778e-6f //Prescaler of 64 used.
+//PID related
+#define K_P 300 //Proportional gain, kp 300
+#define K_I 30 //Integral gain, ki 30
+#define K_D 100 //Differential gain, kd 100
+#define TIME_INTERVAL 5 //PID time interval, Timer2 overflow ~18ms, TI 5
+//PID recalculates every 5x18ms ~90ms
+#define MAX_PID_ERROR 200 //Max proportional error per update, 200
+#define MAX_PIDSUM_ERROR 2000 //Max PID integral error per update, 2000 //Here
+we use 10 x Max_PID_Error, or 10x PID cycles //Bounds to ~1 sec of error build up.
+#define offset_PWM 30 //% of duty cycle before motors start to move, 30
+//non-linear startup, OPENLOOP 0, PID 30
+//Standard Includes
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <avr/pgmspace.h>
+#include <util/delay.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <stdint.h>
+//Custom Includes
+#include "pid/uart.h" //Header includes setup for UART
+#include "pid/pid.h" //AVR221 PID code, written by Atmega
+//---------------------------------------------------------------------------------------
+//Global Variables
+//---------------------------------------------------------------------------------------
+//Timer 1 functional variables static unsigned int PINC_prev = 0x00; //previous
+PINC values;
+//used to detect rising/falling edges
+//Encoder variables for tracking ticks
+static unsigned long left_encoder_count = 0; //Tick counter for left static unsigned long
+right_encoder_count = 0; //Tick counter for right
+//Timer 1 variables for tracking angular velocity
+static unsigned long left_timer_counter = 0; //Timer1 counts since last encoder trip
+static unsigned long right_timer_counter = 0; //Previous count for delta time measure
+static float temp_counts = 0.0; //Used for calcs.
+//Measured Angular Velocity (RPM)
+//Arrays used to get rid of outliers when measuring Angular Velocity (RPM)
+static float l_RPM[5] = {};
+static float r_RPM[5] = {};
+static float sort_RPM[5] = {};
+static float left_RPM = 0.0;
+static float right_RPM = 0.0;
+//Desired Angular Velocity (RPM)
+static float left_RPM_setpoint = 0.0;
+static float right_RPM_setpoint = 0.0;
+static float temp = 0.0;
+//PID Variables
+int16_t ref_Left, measure_Left, inputValue_Left;
+int16_t ref_Right, measure_Right, inputValue_Right;
+struct PID_DATA pidDataLeft;
+struct PID_DATA pidDataRight;
+//---------------------------------------------------------------------------------------
+//Prototype definitions
+//---------------------------------------------------------------------------------------
+ISR(PCINT2_vect);
+ISR(TIMER1_OVF_vect);
+ISR(TIMER2_OVF_vect);
+int cmpfunc (const void * a, const void * b);
+void Set_Input(int16_t inputValueL, int16_t inputValueR);
+void go_forward(float velocity);
+//---------------------------------------------------------------------------------------
+//Interrupt service routines
+//---------------------------------------------------------------------------------------
+// Pin Change Interrupt ----------------------- ENCODER TICK AND ANGULAR VELOCITY UPDATES
+ISR(PCINT2_vect)
+{
+int C2_change = (PINC & (1<<PC2)) ^ (PINC_prev & (1<<PC2)); //Did C2 change
+int C3_change = (PINC & (1<<PC3)) ^ (PINC_prev & (1<<PC3)); //and/or did C3 Change
+//use rising-edge only on C2 for left encoder
+if ((C2_change != 0x00) && (PINC & (1<<PC2)) )
+{
+left_encoder_count++; //Increment Ticks
+//Velocity Measurement
+temp_counts = (float)TCNT1+(float)left_timer_counter;//Period since last
+//Calculate RPM from Timer1 value since last; (Rotation/Notch) / Time in min
+left_RPM=(1.0/(float)Encoder_Notches)/(temp_counts*timer1_period/60);
+sort_RPM[0] = l_RPM[0] = l_RPM[1];
+sort_RPM[1] = l_RPM[1] = l_RPM[2];
+sort_RPM[2] = l_RPM[2] = l_RPM[3];
+sort_RPM[3] = l_RPM[3] = l_RPM[4];
+sort_RPM[4] = l_RPM[4] = left_RPM;
+qsort(sort_RPM, 5, sizeof(float), cmpfunc);
+left_RPM = sort_RPM[2];
+left_timer_counter = 0; //Update prev. value
+right_timer_counter += TCNT1;
+//Reset Timer 1
+TCNT1 = 0;
+}
+//use rising-edge only on C3 for right encoder
+if ((C3_change != 0x00) && (PINC & (1<<PC3)) )
+{
+right_encoder_count++; //Increment Ticks
+//Velocity Measurement
+temp_counts = (float)TCNT1+(float)right_timer_counter;//Period since last //Calculate RPM from Timer1 value
+since last; (Rotation/Notch) / Time in min
+right_RPM=(1.0/(float)Encoder_Notches)/(temp_counts*timer1_period/60);
+sort_RPM[0] = r_RPM[0] = r_RPM[1];
+sort_RPM[1] = r_RPM[1] = r_RPM[2];
+sort_RPM[2] = r_RPM[2] = r_RPM[3];
+sort_RPM[3] = r_RPM[3] = r_RPM[4];
+sort_RPM[4] = r_RPM[4] = right_RPM;
+qsort(sort_RPM, 5, sizeof(float), cmpfunc);
+right_RPM = sort_RPM[2];
+right_timer_counter = 0; //Update prev. value
+left_timer_counter += TCNT1;
+//Reset Timer 1
+TCNT1 = 0;
+}
+//Hard limit. Force update RPM values if counters get out of hand, i.e. < min_RPM if
+(left_timer_counter > 65535)
+{
+left_RPM = (1.0/(float)Encoder_Notches)/(left_timer_counter*timer1_period/60);
+l_RPM[0]=l_RPM[1]=l_RPM[2]=l_RPM[3]=l_RPM[4] = left_RPM;
+}
+if (right_timer_counter > 65535)
+{
+right_RPM=(1.0/(float)Encoder_Notches)/(right_timer_counter*timer1_period/60);
+r_RPM[0]=r_RPM[1]=r_RPM[2]=r_RPM[3]=r_RPM[4] = right_RPM;
+}
+//Update PINC to current reading
+PINC_prev = PINC;
+}
+//Timer1 Overflow Interrupt ---------------------- TIMER FOR ANGULAR VELOCITY MEASUREMENT
+ISR(TIMER1_OVF_vect)
+{
+//Update RPM measurement on overflow... been long time since last tick.. both wheels!
+//If no tick in 0.284 seconds; relatively no movement (<5 RPM) or critical failure!
+left_timer_counter += 65535; right_timer_counter += 65535;
+left_RPM = (1.0/(float)Encoder_Notches)/(left_timer_counter*timer1_period/60);
+l_RPM[0]=l_RPM[1]=l_RPM[2]=l_RPM[3]=l_RPM[4] = left_RPM;
+right_RPM=(1.0/(float)Encoder_Notches)/(right_timer_counter*timer1_period/60);
+r_RPM[0]=r_RPM[1]=r_RPM[2]=r_RPM[3]=r_RPM[4] = right_RPM;
+}
+//Timer2 Overflow Interrupt -------------------------------- PID UPDATE CALCULATION TIMER
+ISR(TIMER2_OVF_vect)
+{
+static uint16_t i = 0;
+// Keep building time intervals until time to perform PID calc.
+if(i < TIME_INTERVAL) { i++; } // PID update time!!
+else
+{
+i = 0;
+ref_Left = left_RPM_setpoint;
+ref_Right = right_RPM_setpoint;
+measure_Left = left_RPM;
+measure_Right = right_RPM;
+if (ref_Left > min_RPM)
+{
+inputValue_Left = pid_Controller(ref_Left, measure_Left, &pidDataLeft);
+} else
+{
+inputValue_Left = -32767; //This is zero for PID controller
+pidDataLeft.sumError = 0; //Prevent integral windup
+}
+if (ref_Right > min_RPM)
+{
+inputValue_Right = pid_Controller(ref_Right, measure_Right, &pidDataRight);
+} else
+{
+inputValue_Right = -32767; //This is zero for PID controller pidDataRight.sumError = 0;
+//Prevent integral windup
+}
+//inputValue_Left = ref_Left * (65535/200) - 32768;//uncomment for OPENLOOP
+//inputValue_Right = ref_Right * (65535/200) - 32768;//uncomment for OPENLOOP
+//Send new process value... PWM duty cycle
+Set_Input(inputValue_Left,inputValue_Right);
+}
+}
+//---------------------------------------------------------------------------------------
+//Function implementations
+//---------------------------------------------------------------------------------------
+//cmpfunc used for sorting arrays
+int cmpfunc (const void * a, const void * b)
+{
+float fa = *(const float*) a;
+float fb = *(const float*) b;
+return (fa>fb) - (fa<fb);
+}
+//Set_Input function is used to send PWM to motors for vehicle control
+void Set_Input(int16_t inputValueL, int16_t inputValueR)
+{
+float tempL = 0.0;
+float tempR = 0.0;
+//Need to translate inputValue from PID to duty-cycle on PWM;
+//Negative is reverse, positive is forward normally,
+//but we don't have quadrature-encoders (two optical channels/wheel)
+// 0 = motor off (no duty cycle and 32768 = motors full on (100% duty cycle)
+//Shift from negative to only positive output from PID
+tempL = (float)inputValueL+32768.0;
+tempR = (float)inputValueR+32768.0;
+//Magnitude scale, plus add offset, as non-linear control
+tempL = tempL/65535.0*100.0 + offset_PWM;
+tempR = tempR/65535.0*100.0 + offset_PWM;
+//Limit magnitudes to ranges actually possible
+if (tempL > 100) {tempL=100.0;}
+else if (tempL<0.4) {tempL=0.4;}
+if (tempR > 100) {tempR=100.0;}
+else if (tempR<0.4) {tempR=0.4;}
+//Send magnitude to TIMER0/PWM comparators for commanding the motors
+OCR0A = tempL/100.0*256.0-1;
+OCR0B = tempR/100.0*256.0-1;
+}
+//Simple forward routine that trusts velocity PID void go_forward(float
+velocity)
+{
+//Vehicle Speed 65mm dia tire; 204.2mm/rotation; at 200RPM, top speed is ~680mm/sec
+//@25% duty cycle - ~1 RPS, @100 d.c.% - ~3 RPS, range of approx 60 - 180 RPM
+//Set direction forward, may need to adjust depending on team wiring/etc.
+PORTB |= (1 << PB6);
+PORTB &= ~(1 << PB5);
+//Set RPM
+left_RPM_setpoint = 60 * velocity / (tire_dia*3.14159); right_RPM_setpoint = 60 *
+velocity / (tire_dia*3.14159);
+}
+//---------------------------------------------------------------------------------------
+//Main Program
+//---------------------------------------------------------------------------------------
+int main(void)
+{
+//Local variable declarations
+char serial_buffer[100] = {0}; //Serial Port Read Buffer
+//Interrupt-based initializations cli();
+//Disable Interrupts
+init_uart(); //Initialize UART w/interrupts (baud/etc)
+PCICR = (1<<PCIE2); //Pin Change Interrupt Control Reg.
+//PC2 is PCINT18 & PC3 is PCINT19, on PCIE2 PCMSK2 = (1<<PCINT18)|(1<<PCINT19); //Pin
+Change Mask Reg.
+//PCINT18 and PCINT19 to trigger interrupt
+TIMSK1 = (1 << TOIE1) ; //Enable timer1 overflow interrupt(TOIE1)
+TIMSK2 = (1 << TOIE2); //Enable timer2 overflow interrupt(TOIE2) sei();
+//Enable Interrupts
+//Timer0 setup, PWM to left and right motors
+DDRB |= (1<<PB3) | (1<<PB4); //Data Dir. Reg. Port B, B3 B4 Out, PWM L R
+DDRB |= (1<<PB5) | (1<<PB6); //Data Dir. Reg. Port B, B5 B6 Out, DIR L R
+TCNT0 = 0x00; //Timer0, start at zero
+TCCR0A = 0xA3; //Timer0 Ctrl Reg. A, non-invrt chan. A & B
+//and Mode 3: FastPWM + MAX limit
+TCCR0B = 0x02; //Timer0 clk source, 8 prescaler & Mode 3
+OCR0A = 0; //Timer0 Output Compare Register A, 8-bit
+OCR0B = 0; //Timer0 Output Compare Register B, 8-bit
+//Timer1 setup; encoder sensor for position & angular velocity
+DDRC &= ~((1<<PC2)|(1<<PC3)); //Data Dir. Reg. PortC, C2 C3 In, Enc L R
+TCNT1 = 0x00; //Timer1, start at zero
+TCCR1A = 0x00; //Timer1 Control Reg. A, normal mode
+TCCR1B = ((1<<CS10)|(1<<CS11)); //Timer1 Control Reg. B, prescale:64,
+//overflow ~0.284s, 16-bit counter
+//Timer2 setup; PID update interval
+TCNT2 = 0x00; //Timer2 start at zero
+TCCR2A = 0x00; //Timer2 Control Reg. A, normal mode
+TCCR2B = ((1<<CS20)|(1<<CS21)|(1<<CS22));//Timer2 Control Reg. B, prescale 1024,
+//Overflow ~18ms, 14.4kHz, 8-bit counter (255)
+//PID initializations
+pid_Init(K_P*SCALING_FACTOR, K_I*SCALING_FACTOR, K_D*SCALING_FACTOR, &pidDataLeft);
+pid_Init(K_P*SCALING_FACTOR, K_I*SCALING_FACTOR, K_D*SCALING_FACTOR, &pidDataRight);
+pidDataLeft.maxError = pidDataRight.maxError = MAX_PID_ERROR; pidDataLeft.maxSumError =
+pidDataRight.maxSumError = MAX_PIDSUM_ERROR; l_RPM[0]=l_RPM[1]=l_RPM[2]=l_RPM[3]=l_RPM[4] =
+0;
+r_RPM[0]=r_RPM[1]=r_RPM[2]=r_RPM[3]=r_RPM[4] = 0;
+//Forward for this robot
+PORTB |= (1 << PB6);
+PORTB &= ~(1 << PB5);
+//Characterization variables unsigned int step_test = 0; //Used for testing PID, 0 off, # on,
+OPENLOOP float step_RPMs[13] = {0, 20, 40, 60, 100, 150, 200, 150, 100, 60, 40, 20, 0}; int
+step_index = 0; //Used for testing PID
+//Endless robot thinking loop... until power dies -----------------------------------
+while (1)
+{
+//Step testing routine, OPENLOOP and PID, make sure update hard-coded array size
+if (step_test > 0)
+{
+step_index++; //50ms/loop, 20s / 0.05s = 400
+if (step_index > 400){step_index = 0;step_test++;}
+if (step_test > 13) {step_test = 1;}
+left_RPM_setpoint=right_RPM_setpoint=step_RPMs[step_test-1];
+}
+//User must push "Enter" to get attention of robot!
+else if (UCSR0A & (1<<RXC0))
+{
+//Get new set point values if input detected
+printf("Enter set-point for left RPM: \n");
+scanf("%s", serial_buffer);
+temp = atof(serial_buffer);
+if (temp > max_RPM) {left_RPM_setpoint= max_RPM;} else if
+(temp< min_RPM) {left_RPM_setpoint=0;} else {left_RPM_setpoint=temp;}
+printf("Enter set-point for right RPM: \n"); scanf("%s", serial_buffer);
+temp = atof(serial_buffer);
+if (temp > max_RPM) {right_RPM_setpoint=max_RPM;} else if
+(temp< min_RPM) {right_RPM_setpoint=0;} else {right_RPM_setpoint=temp;}
+printf("Left RPM: %3.2f, ", left_RPM_setpoint);
+printf("Right RPM: %3.2f\n", right_RPM_setpoint);
+}
+//Otherwise the robot continues to speak it's mind
+//else
+//{
+printf("L_Ticks: %lu, R_Ticks: %lu, ",left_encoder_count,right_encoder_count); printf("L_set:
+%3.0f, R_set: %3.0f, ",left_RPM_setpoint,right_RPM_setpoint); printf("L_RPM: %3.2f, R_RPM:
+%3.2f\n",left_RPM,right_RPM);
+//}
+_delay_ms(50);
+}
+//main while loop-------------------------------------------------------------------- } //main
