@@ -60,7 +60,7 @@ void fsk_cmu(void)
 		else if(manifold[i]==1){
 			OCR1A = 62; // Timer1 2KHz Reload
 		}
-		_delay_ms(10);
+		_delay_us(9091);
 	}
 }
 
@@ -72,6 +72,6 @@ int main(void)
 	sei();
 	while(1){
 		fsk_cmu();
-		_delay_ms(10);
+		_delay_us(9091);
 	}
 }
