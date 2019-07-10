@@ -1,6 +1,6 @@
 //Definitions
 #define F_CPU 14745600UL
-#define AVcc 3.3
+#define AVcc 3.3 //Vref
 
 //Standard Includes
 #include <avr/io.h>
@@ -14,63 +14,67 @@
 static int PutChar(char c, FILE *stream);
 static int GetChar(FILE *stream);
 FILE mystdout = FDEV_SETUP_STREAM(PutChar, NULL, _FDEV_SETUP_WRITE);
-FILE mystdin =  FDEV_SETUP_STREAM(NULL, GetChar, _FDEV_SETUP_READ);
+FILE mystdin =  FDEV_SETUP_STREAM(NULL, GetChar, _FDEV_SETUP_READ); 
 
 static int PutChar(char c, FILE *stream)
 {
-    //Poll UART status register until the "data register empty" bit is set.
-    loop_until_bit_is_set(UCSR0A, UDRE0);
-    //The data register is free for use, so place data onto stream
-    UDR0 = c;
-    return 0;
+	//Poll UART status register until the "data register empty" bit is set.
+	loop_until_bit_is_set(UCSR0A, UDRE0);
+	//The data register is free for use, so place data onto stream
+	UDR0 = c;
+	return 0;
 }
 static int GetChar(FILE *stream)
 {
-    //Poll UART status register until the "receive complete" bit is set.
-    loop_until_bit_is_set(UCSR0A, RXC0);
-    //Return the data received from the stream
-    return UDR0;
+	//Poll UART status register until the "receive complete" bit is set.
+	loop_until_bit_is_set(UCSR0A, RXC0);
+	//Return the data received from the stream
+	return UDR0;
 }
 void init_uart(void)
 {
-    UCSR0B = (1<<RXEN0) | (1<<TXEN0);   //Enable the RX/TX on UART0
-    UCSR0C = (1<<UCSZ01) | (1<<UCSZ00); //8-data-bits per char, 1 stop bit
-    UBRR0 = 7;
-    //Baud rate, 115200, CPU=14.7456 MHz
-    stdout = &mystdout;
-    stdin = &mystdin;
+	UCSR0B = (1<<RXEN0) | (1<<TXEN0);   //Enable the RX/TX on UART0
+	UCSR0C = (1<<UCSZ01) | (1<<UCSZ00); //8-data-bits per char, 1 stop bit
+	UBRR0 = 7;
+	//Baud rate, 115200, CPU=14.7456 MHz
+	stdout = &mystdout;
+	stdin = &mystdin;
 }
 
 
 //Init Analog to Digital Converter range AVcc, scaler 128, clock of 115.2kHz
 void adc_init(void)
 {
-    ADMUX = (1<<REFS0); 	//Use AVcc with external cap
-    ADCSRA = (1<<ADEN)|(1<<ADPS2)|(1<<ADPS1)|(1<<ADPS0);  //Enable ADC, scaler
+	ADMUX = (1<<REFS0); 	//Use AVcc with external cap
+	ADCSRA = (1<<ADEN)|(1<<ADPS2)|(1<<ADPS1)|(1<<ADPS0);  //Enable ADC, scaler
 }
 void adc_set_channel(unsigned int read_ADC_channel)
 {
-    read_ADC_channel &= 0x03;                   	//Valid input chn. 0-3
-    ADMUX = (ADMUX & 0b11111000)|read_ADC_channel;  //Select desired channel
-    ADCSRA |= (1<<ADSC);                        	//ADC Ctl & Status Reg. A
-    while(ADCSRA & (1<<ADSC));                  	//Waits for conversion/read
+	read_ADC_channel &= 0x07;                   	//Valid input chn. 0-7
+	ADMUX = (ADMUX & 0b11111000)|read_ADC_channel;  //Select desired channel
+	ADCSRA |= (1<<ADSC);                        	//ADC Ctl & Status Reg. A
+	while(ADCSRA & (1<<ADSC));                  	//Waits for conversion/read
 }
 int main(void)
-{    
-    //Interrupt-based initializations
-    cli();
-    //Disable Interrupts for setting registers
-    init_uart();
-    //Initialize UART (baud/parity/flow/etc)
-    sei();
-    //Enable Interrupts
-    int result; // variable to store the ADCW register value
-    adc_init(); // initialize the registers for ADC conversions
-    while(1) {
-   	 adc_set_channel(1); // choose the ADC channel 1
-   	 result = (int) ADCW;
-   	 float a1 = result*AVcc/1023.0; // convert the ADCW value to a voltage
-    	 printf("Converted voltage: %3.2fV\n",a1); // print the voltage to the terminal
-   	 _delay_ms(1000); //one second delay to keep the terminal clean
-    }
+{
+	//Interrupt-based initializations
+	cli();
+	//Disable Interrupts for setting registers
+	init_uart();
+	//Initialize UART (baud/parity/flow/etc)
+	sei();
+	//Enable Interrupts
+	int result; // variable to store the ADCW register value
+	adc_init(); // initialize the registers for ADC conversions
+	while(1) {
+		adc_set_channel(7); // choose the ADC channel 1
+		result = (int) ADCW;
+		float a1 = result*AVcc/1023.0; // convert the ADCW value to a voltage
+		if(a1 > 0.5) {
+			printf("Converted V: %3.2fV, Metal detected\n", a1);
+		}else{
+			printf("Converted V: %3.2fV, Metal not detected\n", a1);
+		}
+		_delay_ms(1000); //one second delay to keep the terminal clean
+	}
 }
