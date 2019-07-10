@@ -67,7 +67,7 @@ int main(void)
 	int result; // variable to store the ADCW register value
 	adc_init(); // initialize the registers for ADC conversions
 	while(1) {
-		adc_set_channel(7); // choose the ADC channel 1
+		adc_set_channel(7); // choose the ADC channel 7
 		result = (int) ADCW;
 		float a1 = result*AVcc/1023.0; // convert the ADCW value to a voltage
 		if(a1 > 0.5) {
