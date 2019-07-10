@@ -1,0 +1,64 @@
+#define F_CPU 14745600UL
+#define AVcc 3.3
+#include <avr/io.h>
+#include <avr/interrupt.h>
+#include <avr/pgmspace.h>
+#include <util/delay.h>
+#include <stdio.h>
+#include <stdlib.h>
+
+static int PutChar(char c, FILE *stream);
+static int GetChar(FILE *stream);
+FILE mystdout = FDEV_SETUP_STREAM(PutChar, NULL, _FDEV_SETUP_WRITE);
+FILE mystdin =	FDEV_SETUP_STREAM(NULL, GetChar, _FDEV_SETUP_READ);
+static int PutChar(char c, FILE	*stream)
+{
+  loop_until_bit_is_set(UCSR0A, UDRE0);
+  UDR0 = c;
+  return 0;
+}
+static int GetChar(FILE *stream)
+{
+  loop_until_bit_is_set(UCSR0A, RXC0);
+  return UDR0;
+}
+void init_uart(void)
+{
+  UCSR0B = (1<<RXEN0) | (1<<TXEN0);	//Enable the RX/TX on UART0
+  UCSR0C = (1<<UCSZ01) | (1<<UCSZ00);	//8-data-bits per char, 1 stop bit
+  UBRR0 = 7; //Baud rate, 115200, CPU=14.7456 MHz
+  stdout = &mystdout;
+  stdin = &mystdin;
+}
+
+void adc_init(void){
+  ADMUX = (1<<REFS0);
+  ADCSRA = (1<<ADEN)|(1<<ADPS2)|(1<<ADPS1)|(1<<ADPS0);
+}
+
+void adc_set_channel(unsigned int read_ADC_channel){
+  read_ADC_channel &= 0x03;
+  ADMUX = (ADMUX & 0b11111000) | read_ADC_channel;
+  ADCSRA |= (1<<ADSC);
+  while(ADCSRA & (1<<ADSC));
+}
+
+int main(void)
+{
+  //Interrupt-based initializations
+  cli();								
+  init_uart();// initialize the communication program			
+  sei();								
+  float d = 3901.0;
+  adc_init();// initialize the ADC converter
+  while (1)
+  {
+    adc_set_channel(2);// set PA2 as the output
+    d = ADC*AVcc/1023.0; calculate the value of the voltage
+    if(d<0.5){ 
+      printf("V: %3.2fV,Not at the edge\n",d);
+    else{
+      printf("V: %3.2fV,Reach the edge\n",d);}
+    delay_ms(500); 
+  }
+}
